@@ -1,208 +1,228 @@
 # VPS-SSH-Wrapper
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A lightweight Python library and CLI tools for secure SSH access to remote VPS instances. Designed specifically for integration with local AI CLI agents (like Grok Engineer, Claude, etc.) to enable remote server administration via natural language commands.
+Lightweight Python SSH client and CLI for remote VPS administration, designed for both human operators and AI assistants.
 
-## 🚀 Features
+## Description
 
-- **Persistent SSH Connections**: Automatic reconnection and connection health checks.
-- **Secure Credentials**: Uses `.env` files for passwords/keys (supports both password and key-based auth).
-- **CLI Tools**:
-  - `main.py` (or `vps` after `pip install -e .`): Unified CLI - `vps cmd "command"`, `vps shell`, `vps put`, `vps get`
-  - Legacy: `vps_cmd.py`, `vps_shell.py` (direct scripts)
-- **File Transfer**: Upload/download files and directories via SFTP with progress display.
-- **Python API**: Simple class for embedding in scripts/tools.
-- **Thread-Safe**: Uses locks for concurrent command execution.
-- **Error-Resilient**: Retries on failures with reconnection.
-- **Examples Included**: Security scans, log checks, resource monitoring.
+### Features
 
-Perfect for AI agents to run shell commands on your VPS without exposing raw SSH keys or managing sessions manually.
+- **Persistent SSH Connections** with automatic reconnection and health checks
+- **Secure Credentials** via `.env` files (password or key-based auth)
+- **Unified CLI** (`vps cmd`, `vps shell`, `vps put`, `vps get`)
+- **File Transfer** (upload/download files and directories via SFTP with progress bars)
+- **Python API** (`PersistentSSH` class for embedding in scripts)
+- **Thread-Safe** (internal locking for concurrent command execution)
+- **Error-Resilient** (retries failed commands after reconnecting)
 
-## 📦 Installation
+### Installation
 
-1. **Clone/Download** this repository:
-   ```bash
-   git clone https://github.com/fabiopauli/ssh-wrapper.git
-   cd ssh-wrapper
-   ```
-
-2. **Install Dependencies & CLI**:
-   ```bash
-   # Core deps
-   pip install -r requirements.txt
-   
-   # Editable install for `vps` CLI command (recommended)
-   pip install -e .
-   
-   # Or uv (faster)
-   uv pip install -r requirements.txt -e .
-   ```
-   Now use `vps cmd "df -h"` or `python main.py cmd "df -h"`
-
-3. **Setup Credentials** (create `.env` in project root):
-   ```
-   login=username@your-vps-hostname.com
-   password=your-strong-password
-   ```
-   - **Pro Tip**: For production, use SSH keys instead:
-     ```
-     login=username@your-vps-hostname.com
-     # password= (omit)
-     ```
-     Pass `key_filename="/path/to/private_key"` to `PersistentSSH`.
-
-   ⚠️ **Security Warning**: Never commit `.env` to git! Add it to `.gitignore`. Prefer SSH keys over passwords.
-
-## ⚡ Quick Start
-
-### 1. Single Command (CLI)
 ```bash
-# Installed CLI
+git clone https://github.com/fabiopauli/ssh-wrapper.git
+cd ssh-wrapper
+pip install -e .
+```
+
+After install, the `vps` command is available system-wide.
+
+You can also run scripts directly without installing:
+```bash
+python main.py cmd "df -h"
+python vps_cmd.py "df -h"
+```
+
+### Setup Credentials (.env)
+
+Copy `.env_example` to `.env` and edit your values:
+
+```
+login=username@your-vps-hostname.com
+password=your-strong-password
+```
+
+**SSH key auth (recommended):** Place your private key file in the `./keys/` directory and reference it by filename:
+
+```
+login=username@your-vps-hostname.com
+SSH_KEY_FILE=id_rsa
+```
+
+The key path resolves to `./keys/id_rsa`. When `SSH_KEY_FILE` is set, password can be omitted.
+
+Never commit `.env` to git -- it is already in `.gitignore`.
+
+### CLI Usage
+
+```bash
+# Run a single command
 vps cmd "df -h"
 vps cmd --timeout 60 "sudo systemctl restart nginx"
 
-# Or direct
-python main.py cmd "df -h"
-
-# Interactive cmds better with shell
-vps shell  # then htop
-```
-
-### 2. Interactive Shell
-```bash
-# Installed CLI
+# Interactive shell (exit with 'exit' or Ctrl+C)
 vps shell
 
-# Or direct
-python main.py shell
-```
-- Full TTY shell. `exit` or Ctrl+C to quit. Tab-completion, history supported.
-
-### 3. File Transfer
-```bash
-# Upload a file
+# Upload file or directory
 vps put ./backup.sql /home/user/backups/backup.sql
-
-# Download a file
-vps get /var/log/nginx/access.log ./logs/access.log
-
-# Upload a directory (recursive)
 vps put ./my-app/ /home/user/apps/my-app/
 
-# Download a directory (recursive)
+# Download file or directory
+vps get /var/log/nginx/access.log ./logs/access.log
 vps get /home/user/configs/ ./backup-configs/
 
-# Quiet mode (no progress bar)
+# Quiet mode (suppress progress bars)
 vps put -q ./large-file.tar.gz /home/user/large-file.tar.gz
 ```
 
-### 4. Python Scripts
+### Python API Reference
+
 ```python
-from dotenv import load_dotenv
 from ssh_util import PersistentSSH
-import os
 
-load_dotenv()
-login = os.getenv('login')
-password = os.getenv('password')
-if '@' not in login:
-    raise ValueError("login format: username@hostname")
-
-username, hostname = login.split('@', 1)
-
-ssh = PersistentSSH(hostname=hostname, username=username, password=password, key_filename=None)  # or key_filename="./keys/id_rsa.pem"
-try:
-    result = ssh.execute("uptime", timeout=10)
-    print("Output:", result['output'])
-    print("Errors:", result['error'])
-    print("Exit Code:", result['exit_status'])
-finally:
-    ssh.close()
+ssh = PersistentSSH(
+    hostname="your-vps.example.com",
+    username="user",
+    password="pass",        # or omit if using key
+    key_filename="./keys/id_rsa",  # or omit if using password
+    port=22
+)
 ```
-
-## 🛠 API Reference
-
-### `PersistentSSH(hostname, username, password=None, key_filename=None, port=22)`
 
 | Method | Description | Returns |
 |--------|-------------|---------|
-| `connect()` | Establishes SSH connection (called in `__init__`). | None |
-| `is_connected()` | Checks connection liveness. | `bool` |
-| `execute(command, timeout=30)` | Runs command with auto-reconnect/retry. | `dict`: `{'output': str, 'error': str, 'exit_status': int}` |
-| `reconnect()` | Force reconnect. | None |
-| `close()` | Closes connection. | None |
-| `get_sftp()` | Returns SFTP client (lazy init). | `paramiko.SFTPClient` |
-| `put(local, remote, callback)` | Upload file. | `dict`: `{'success': bool, 'error': str, 'bytes_transferred': int}` |
-| `get(remote, local, callback)` | Download file. | `dict`: `{'success': bool, 'error': str, 'bytes_transferred': int}` |
-| `put_dir(local_dir, remote_dir, callback)` | Upload directory recursively. | `dict`: `{'success': bool, 'files_transferred': int, 'total_bytes': int, 'failed_files': list}` |
-| `get_dir(remote_dir, local_dir, callback)` | Download directory recursively. | `dict`: `{'success': bool, 'files_transferred': int, 'total_bytes': int, 'failed_files': list}` |
+| `connect()` | Establish SSH connection (called automatically by `__init__`). | `None` |
+| `is_connected()` | Check if connection is alive. | `bool` |
+| `execute(command, timeout=30)` | Run command with auto-reconnect and retry. | `{'output': str, 'error': str, 'exit_status': int}` |
+| `reconnect()` | Force reconnect. | `None` |
+| `close()` | Close SSH and SFTP connections. | `None` |
+| `get_sftp()` | Get SFTP client (lazy-initialized). | `paramiko.SFTPClient` |
+| `put(local, remote, callback)` | Upload a file. | `{'success': bool, 'error': str, 'bytes_transferred': int}` |
+| `get(remote, local, callback)` | Download a file. | `{'success': bool, 'error': str, 'bytes_transferred': int}` |
+| `put_dir(local_dir, remote_dir, callback)` | Upload directory recursively. | `{'success': bool, 'files_transferred': int, 'total_bytes': int, 'failed_files': list}` |
+| `get_dir(remote_dir, local_dir, callback)` | Download directory recursively. | `{'success': bool, 'files_transferred': int, 'total_bytes': int, 'failed_files': list}` |
 
-- **Thread-Safe**: Use in multi-threaded apps (internal `Lock`).
-- **Timeouts**: Custom per-command.
-- **Encoding**: UTF-8 stdout/stderr.
+### Project Structure
 
-### Common Admin Tasks
-```bash
-# Logs
-vps cmd "tail -f -n 100 /var/log/nginx/error.log"
-
-# Services
-vps cmd "systemctl status nginx && systemctl status postgresql"
-
-# Resources
-vps cmd "df -h && free -h && ps aux --sort=-%mem | head -10"
-
-# Updates
-vps cmd "apt update && apt upgrade -y"
-```
-
-
-## 🤖 AI Agent Integration
-
-This wrapper is ideal for tools like Grok CLI or Claude Code:
-
-1. Add `vps_cmd.py` execution to agent tools.
-2. Agent can run: `python vps_cmd.py "command"` via shell tools.
-3. Parse `output`/`error`/`exit_status` for decisions.
-
-Example agent tool prompt: "Use `vps_cmd.py` to check server status before deploying."
-
-## 🐛 Troubleshooting
-
-- **Connection Fails**: Verify `login` format, firewall, SSH port.
-- **Permission Denied**: Use `sudo` in commands if needed (may prompt for password—use keys!).
-- **Interactive Commands Fail**: Use `vps_shell.py` for `htop`, `vim`, etc.
-- **Timeouts**: Increase `timeout` in `execute()`.
-- **Reconnection Loops**: Check network stability.
-
-## 📁 Project Structure
 ```
 ssh-wrapper/
-├── keys/                # SSH private keys (optional)
-├── ssh_util.py          # Core SSH class
-├── vps_cmd.py           # Single-command CLI
-├── vps_shell.py         # Interactive shell CLI
-├── main.py              # Unified CLI entrypoint (vps cmd/shell)
+├── keys/                # SSH private keys (gitignored)
+├── ssh_util.py          # Core PersistentSSH class
+├── vps_cmd.py           # Standalone single-command script
+├── vps_shell.py         # Standalone interactive shell script
+├── main.py              # Unified CLI entrypoint (vps cmd/shell/put/get)
+├── .env_example         # Example credentials file
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
 ```
 
-## 🔒 Security Best Practices
-- **SSH Keys**: Preferred over passwords.
-- **No Root Login**: Use sudoers for privilege escalation.
-- **Fail2Ban**: Enable on VPS to block brute-force.
-- **Audit Logs**: Monitor `/var/log/auth.log`.
-- **Environment**: Never hardcode creds—always `.env`.
+### Troubleshooting
 
+- **Connection fails**: Verify `login` format is `user@host`, check firewall rules and SSH port.
+- **Permission denied**: Use `sudo` in commands, or switch to SSH key auth.
+- **Interactive commands hang**: Use `vps shell` for tools like `htop`, `vim`, etc.
+- **Command timeouts**: Increase timeout with `--timeout` flag or `timeout=` parameter.
+- **Reconnection loops**: Check network stability and VPS availability.
 
-## 📄 License
-MIT License
+### Security Best Practices
 
-## 🙏 Acknowledgments
-Built with [Paramiko](https://www.paramiko.org/) for SSH.
+- Prefer SSH keys over passwords. Place keys in `./keys/` and set `SSH_KEY_FILE` in `.env`.
+- Never hardcode credentials -- always use `.env`.
+- Disable root login on your VPS; use sudoers for privilege escalation.
+- Enable Fail2Ban on your VPS to block brute-force attempts.
+- Monitor `/var/log/auth.log` for suspicious activity.
 
 ---
 
-*Made for AI-powered DevOps!*
+## For AI Assistants
+
+This section is for AI agents (Claude Code, etc.) that use this tool to execute commands on a remote VPS.
+
+### What this tool does for you
+
+VPS-SSH-Wrapper lets you run shell commands on a remote server and get structured output back. It handles SSH connection management, reconnection, and credential loading automatically.
+
+### Setup (prerequisites before use)
+
+Before you can use this tool, the user must have:
+
+1. Installed the package: `pip install -e .` (from the project root)
+2. Created a `.env` file with at minimum `login=user@host` and either `password=...` or `SSH_KEY_FILE=keyname` (with the key in `./keys/`)
+3. Verified connectivity: `vps cmd "echo ok"`
+
+### Primary tool: vps_cmd.py
+
+For non-interactive command execution, use `vps_cmd.py`. It loads credentials from `.env` automatically.
+
+**Syntax:**
+```bash
+python vps_cmd.py "command to run"
+```
+
+**Output format:**
+- **stdout**: Command output printed to stdout
+- **stderr**: Error output printed to stderr
+- **exit code**: The process exits with the remote command's exit code
+
+**Examples:**
+```bash
+# Check disk space
+python vps_cmd.py "df -h"
+
+# Check running services
+python vps_cmd.py "systemctl status nginx"
+
+# View recent logs
+python vps_cmd.py "tail -n 50 /var/log/nginx/error.log"
+
+# Check system resources
+python vps_cmd.py "free -h && uptime"
+
+# Run multiple commands
+python vps_cmd.py "apt update && apt list --upgradable"
+```
+
+**Interpreting results:**
+- Exit code `0` means success.
+- Non-zero exit code means the command failed. Check stderr for details.
+- If the connection itself fails, an error is printed to stderr and exit code is `1`.
+
+### File transfer
+
+Use the installed CLI for file transfers:
+
+```bash
+# Upload
+vps put <local_path> <remote_path>
+
+# Download
+vps get <remote_path> <local_path>
+```
+
+Both support files and directories. Add `-q` for quiet mode (no progress output).
+
+### Output format reference
+
+When using the Python API (`ssh.execute()`), the return value is a dict:
+
+```python
+{
+    'output': str,      # stdout from the command
+    'error': str,       # stderr from the command
+    'exit_status': int  # exit code (0 = success)
+}
+```
+
+File transfer methods return:
+
+```python
+# Single file (put/get)
+{'success': bool, 'error': str | None, 'bytes_transferred': int}
+
+# Directory (put_dir/get_dir)
+{'success': bool, 'error': str | None, 'files_transferred': int, 'total_bytes': int, 'failed_files': list}
+```
+
+---
+
+## License
+
+MIT License
