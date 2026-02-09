@@ -13,8 +13,11 @@ import argparse
 import os
 import sys
 import select
+import signal
 import stat
-import time
+import struct
+import termios
+import tty
 from dotenv import load_dotenv
 from ssh_util import PersistentSSH
 
@@ -50,25 +53,63 @@ def cmd(args):
     finally:
         ssh.close()
 
-def interactive_shell(ssh_conn):
-    channel = ssh_conn.ssh.invoke_shell()
-    channel.settimeout(0.1)
-    print("=== VPS Interactive Shell (type 'exit' or Ctrl+C) ===")
+def _get_terminal_size():
+    """Get terminal dimensions (cols, rows)."""
     try:
+        import fcntl
+        s = struct.pack('HHHH', 0, 0, 0, 0)
+        result = struct.unpack('HHHH',
+                               fcntl.ioctl(sys.stdout.fileno(),
+                                           termios.TIOCGWINSZ, s))
+        return result[1], result[0]  # cols, rows
+    except Exception:
+        return 80, 24
+
+
+def interactive_shell(ssh_conn):
+    """Open an interactive shell with full raw terminal support."""
+    cols, rows = _get_terminal_size()
+    term = os.environ.get('TERM', 'xterm-256color')
+    channel = ssh_conn.ssh.invoke_shell(term=term, width=cols, height=rows)
+
+    def sigwinch_handler(signum, frame):
+        c, r = _get_terminal_size()
+        try:
+            channel.resize_pty(width=c, height=r)
+        except Exception:
+            pass
+
+    old_settings = termios.tcgetattr(sys.stdin)
+    old_sigwinch = signal.getsignal(signal.SIGWINCH)
+
+    try:
+        tty.setraw(sys.stdin.fileno())
+        tty.setcbreak(sys.stdin.fileno())
+        channel.settimeout(0.0)
+        signal.signal(signal.SIGWINCH, sigwinch_handler)
+
         while True:
-            if channel.recv_ready():
-                output = channel.recv(4096).decode('utf-8', errors='ignore')
-                sys.stdout.write(output)
-                sys.stdout.flush()
-            if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
-                user_input = sys.stdin.readline()
-                if user_input.strip().lower() == 'exit':
+            r, w, e = select.select([channel, sys.stdin], [], [])
+
+            if channel in r:
+                try:
+                    data = channel.recv(4096)
+                    if len(data) == 0:
+                        break
+                    sys.stdout.buffer.write(data)
+                    sys.stdout.buffer.flush()
+                except Exception:
                     break
-                channel.send(user_input)
-            time.sleep(0.01)
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
+
+            if sys.stdin in r:
+                data = os.read(sys.stdin.fileno(), 1024)
+                if len(data) == 0:
+                    break
+                channel.send(data)
+
     finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        signal.signal(signal.SIGWINCH, old_sigwinch)
         channel.close()
 
 def shell(args):
